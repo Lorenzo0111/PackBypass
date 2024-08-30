@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "packbypass",
+  "version": "${version}",
+  "name": "PackBypass",
+  "description": "A simple mod to bypass the resource pack check",
+  "authors": [
+    "Lorenzo0111"
+  ],
+  "contact": {
+    "repo": "https://github.com/Lorenzo0111/PackBypass"
+  },
+  "license": "MIT",
+  "icon": "assets/PackBypass/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "me.lorenzo0111.packbypass.PackBypass"
+    ]
+  },
+  "mixins": [
+    "packbypass.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
