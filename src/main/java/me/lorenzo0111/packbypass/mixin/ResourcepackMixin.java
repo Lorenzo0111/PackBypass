@@ -2,52 +2,43 @@ package me.lorenzo0111.packbypass.mixin;
 
 import me.lorenzo0111.packbypass.PackBypass;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.network.ClientCommonNetworkHandler;
 import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.option.ServerList;
-import net.minecraft.network.packet.c2s.play.ResourcePackStatusC2SPacket;
-import net.minecraft.network.packet.s2c.play.ResourcePackSendS2CPacket;
-import net.minecraft.screen.ScreenTexts;
+import net.minecraft.network.ClientConnection;
+import net.minecraft.network.packet.c2s.common.ResourcePackStatusC2SPacket;
+import net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket;
 import net.minecraft.text.Text;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.*;
 
 import java.net.URL;
-import java.util.concurrent.CompletableFuture;
+import java.util.UUID;
 
 @Debug(export = true)
-@Mixin(ClientPlayNetworkHandler.class)
+@Mixin(ClientCommonNetworkHandler.class)
 public abstract class ResourcepackMixin {
 
     @Shadow
     @Final
-    private MinecraftClient client;
+    protected MinecraftClient client;
 
     @Shadow
     @Final
     @Nullable
-    private ServerInfo serverInfo;
+    protected ServerInfo serverInfo;
 
     @Shadow
-    protected abstract void feedbackAfterDownload(CompletableFuture<?> downloadFuture);
-
-    @Shadow
-    protected abstract void sendResourcePackStatus(ResourcePackStatusC2SPacket.Status packStatus);
-
-    @Shadow
-    private static Text getServerResourcePackPrompt(Text defaultPrompt, @Nullable Text customPrompt) {
-        return null;
-    }
+    @Final
+    protected ClientConnection connection;
 
     @Shadow
     @Nullable
-    private static URL resolveUrl(String url) {
+    private static URL getParsedResourcePackUrl(String url) {
         return null;
     }
 
-    @Shadow
-    public abstract @Nullable ServerInfo getServerInfo();
+    @Shadow protected abstract Screen createConfirmServerResourcePackScreen(UUID id, URL url, String hash, boolean required, @Nullable Text prompt);
 
     /**
      * @author Lorenzo0111 - PackBypass
@@ -55,52 +46,27 @@ public abstract class ResourcepackMixin {
      */
     @Overwrite
     public void onResourcePackSend(ResourcePackSendS2CPacket packet) {
-        URL url = resolveUrl(packet.getURL());
-        String sha = packet.getSHA1();
+        UUID uuid = packet.id();
+        URL url = getParsedResourcePackUrl(packet.url());
+        String hash = packet.hash();
 
         if (url == null) {
-            this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.DECLINED);
+            this.connection.send(new ResourcePackStatusC2SPacket(uuid, ResourcePackStatusC2SPacket.Status.INVALID_URL));
             return;
         }
 
-        ServerInfo.ResourcePackPolicy policy = this.getServerInfo() != null ? this.getServerInfo().getResourcePackPolicy() : ServerInfo.ResourcePackPolicy.PROMPT;
-        PackBypass.LOGGER.info("Resourcepack policy: " + policy);
+        ServerInfo.ResourcePackPolicy policy = serverInfo != null ? serverInfo.getResourcePackPolicy() : ServerInfo.ResourcePackPolicy.PROMPT;
+        PackBypass.LOGGER.info("Resourcepack policy: {}", policy);
 
         switch (policy) {
-            case ENABLED -> {
-                this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.ACCEPTED);
-                this.feedbackAfterDownload(this.client.getServerResourcePackProvider().download(url, sha, true));
-            }
+            case ENABLED -> this.client.getServerResourcePackProvider().addResourcePack(uuid, url, hash);
             case DISABLED -> {
-                this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.ACCEPTED);
-                this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.SUCCESSFULLY_LOADED);
+                this.connection.send(new ResourcePackStatusC2SPacket(uuid, ResourcePackStatusC2SPacket.Status.ACCEPTED));
+                this.connection.send(new ResourcePackStatusC2SPacket(uuid, ResourcePackStatusC2SPacket.Status.SUCCESSFULLY_LOADED));
             }
-            case PROMPT -> this.client.execute(() -> this.client.setScreen(new ConfirmScreen((accepted) -> {
-                this.client.setScreen(null);
-
-                if (accepted) {
-                    if (this.serverInfo != null) {
-                        this.serverInfo.setResourcePackPolicy(ServerInfo.ResourcePackPolicy.ENABLED);
-                    }
-
-                    this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.ACCEPTED);
-                    this.feedbackAfterDownload(this.client.getServerResourcePackProvider().download(url, sha, true));
-                } else {
-                    this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.ACCEPTED);
-                    this.sendResourcePackStatus(ResourcePackStatusC2SPacket.Status.SUCCESSFULLY_LOADED);
-
-                    if (this.serverInfo != null) {
-                        this.serverInfo.setResourcePackPolicy(ServerInfo.ResourcePackPolicy.DISABLED);
-                    }
-                }
-
-                if (this.serverInfo != null) {
-                    ServerList.updateServerListEntry(this.serverInfo);
-                }
-
-            }, Text.translatable("multiplayer.texturePrompt.line1").append(" ").append(Text.translatable("")), getServerResourcePackPrompt(Text.translatable("multiplayer.texturePrompt.line2"), packet.getPrompt()), ScreenTexts.YES, Text.translatable("multiplayer.texturePrompt.bypass"))));
+            case PROMPT ->
+                    this.client.setScreen(this.createConfirmServerResourcePackScreen(uuid, url, hash, false, packet.prompt().orElse(null)));
         }
-
     }
 
 }
